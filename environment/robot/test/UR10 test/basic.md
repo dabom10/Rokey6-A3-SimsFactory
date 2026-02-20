@@ -321,3 +321,8 @@ for i in range(ctrl.get_articulation_dof_count(art)):
     dof = ctrl.get_articulation_dof(art, i)
     print(f"[{i}] {ctrl.get_dof_name(dof)}")
 ```
+
+# after_basic.usd
+기존 basic.usd 수정 파일
+- 기존 basic.usd 파일에서 에셋들이 바닥보다 밑에 깔려 있어, 2/19에 개발한 부분으로 다시 롤백해서 수정한 파일입니다.
+- 필요사항: 컨베이어벨트 속도 조절 / 큐브 컨베이어에 올리기(현재: 큐브 올리면 튕김) / pick&place 동작 구현
