@@ -72,11 +72,7 @@ class KR210_ConveyorSample(BaseSample):
         if get_prim_at_path(f"{self.robot_prim_path}/Graphs"):
             delete_prim(f"{self.robot_prim_path}/Graphs")
 
-        # 3. [수정됨] 카메라 뷰 시원하게 뒤로 빼기
-        set_camera_view(eye=np.array([3.3382, -6.4937, 5.4855]), target=np.array([4.0386, -16.0493, 2.6218]))
-
-
-        # 4. 책 스폰
+        # 3. 책 스폰
         start_pos = np.array([4.5376, -15.5464, 2.8])
         
         world.scene.add(DynamicCuboid(
@@ -99,7 +95,12 @@ class KR210_ConveyorSample(BaseSample):
         self.robot = Articulation(prim_path=self.robot_prim_path, name="kr210")
         self._world.scene.add(self.robot)
         
+        # 물리 엔진이 플레이 상태로 넘어갈 때까지 대기
         await self._world.play_async()
+        
+        # ✅ 플레이 상태 진입 직후! 여기서 카메라 뷰를 덮어씌워야 초기화되지 않습니다.
+        set_camera_view(eye=np.array([4.1784, -6.2238, 4.7902]), target=np.array([2.3528, -15.7560, 2.3813]))
+
         self.robot.initialize()
         
         self.ik_solver = KR210IK(self.robot_prim_path)
@@ -111,7 +112,7 @@ class KR210_ConveyorSample(BaseSample):
         wheel_names = ['wheel_back_left', 'wheel_front_right', 'wheel_front_left', 'wheel_back_right']
         self.wheel_indices = [self.robot.get_dof_index(n) for n in wheel_names]
         
-        # [핵심] 시작할 때의 바퀴 위치를 기억해서 주차 브레이크로 사용!
+        # 시작할 때의 바퀴 위치를 기억해서 주차 브레이크로 사용
         self.initial_wheel_pos = self.robot.get_joint_positions()[self.wheel_indices]
         
         self._world.add_physics_callback("sim_step", callback_fn=self.physics_step)
@@ -121,13 +122,12 @@ class KR210_ConveyorSample(BaseSample):
         self.prev_pos = self.red_book.get_world_pose()[0]
 
     def move_to_target(self, target_joints, speed=0.03):
-        """[수정됨] 팔 관절 이동과 바퀴 브레이크를 하나의 Action으로 합쳐서 전송!"""
+        """팔 관절 이동과 바퀴 브레이크를 하나의 Action으로 합쳐서 전송!"""
         current_joints = self.robot.get_joint_positions()[self.joint_indices]
         diff = target_joints - current_joints
         dist = np.linalg.norm(diff)
         
         if dist < 0.05:
-            # 목표 도달 시에도 바퀴는 꽉 잠가둡니다
             action = ArticulationAction(
                 joint_positions=np.concatenate([target_joints, self.initial_wheel_pos]), 
                 joint_indices=self.joint_indices + self.wheel_indices
@@ -138,7 +138,6 @@ class KR210_ConveyorSample(BaseSample):
         step = diff * (speed / dist)
         next_joints = current_joints + step if np.linalg.norm(step) < dist else target_joints
         
-        # 팔은 목표로 이동, 바퀴는 초기 위치(정지)로 고정
         action = ArticulationAction(
             joint_positions=np.concatenate([next_joints, self.initial_wheel_pos]), 
             joint_indices=self.joint_indices + self.wheel_indices
