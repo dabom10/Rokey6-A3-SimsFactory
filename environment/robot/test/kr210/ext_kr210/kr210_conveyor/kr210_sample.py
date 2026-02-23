@@ -58,7 +58,7 @@ class KR210_ConveyorSample(BaseSample):
         self.book_scale = np.array([0.45509, 0.08313, 0.5]) 
         self.place_offset = np.array([-1.2, 0.0, 0.5])
         
-        self.env_usd_path = "/home/rokey/Rokey6-A3-SimsFactory/environment/robot/test/kr210/basic.usd"
+        self.env_usd_path = "/home/kyb/Rokey6-A3-SimsFactory/environment/robot/test/kr210/basic.usd"
         self.robot_prim_path = "/Root/run_robot"
 
     def setup_scene(self):
@@ -73,7 +73,7 @@ class KR210_ConveyorSample(BaseSample):
             delete_prim(f"{self.robot_prim_path}/Graphs")
 
         # 3. 책 스폰
-        start_pos = np.array([4.5376, -15.5464, 2.8])
+        start_pos = np.array([4.5, -14.8, 3])
         
         world.scene.add(DynamicCuboid(
             prim_path="/World/RedBook", name="red_book",
@@ -81,11 +81,11 @@ class KR210_ConveyorSample(BaseSample):
         ))
         world.scene.add(DynamicCuboid(
             prim_path="/World/BlueBook", name="blue_book",
-            position=start_pos + np.array([1.0, 0, 0]), scale=self.book_scale, color=np.array([0, 0, 1]), mass=1.0
+            position=start_pos + np.array([0, -1.0, 0]), scale=self.book_scale, color=np.array([0, 0, 1]), mass=1.0
         ))
         world.scene.add(DynamicCuboid(
             prim_path="/World/YellowBook", name="yellow_book",
-            position=start_pos + np.array([2.0, 0, 0]), scale=self.book_scale, color=np.array([1, 1, 0]), mass=1.0
+            position=start_pos + np.array([0, -2.0, 0]), scale=self.book_scale, color=np.array([1, 1, 0]), mass=1.0
         ))
 
     async def setup_post_load(self):
