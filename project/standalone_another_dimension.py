@@ -23,7 +23,7 @@ from isaacsim.core.utils.types import ArticulationAction
 # ================================
 # 설정 상수
 # ================================
-ENV_USD_PATH = "/home/kyb/Rokey6-A3-SimsFactory/project/environment.usd"
+ENV_USD_PATH = "/home/rokey/Rokey6-A3-SimsFactory/project/environment.usd"
 
 ROBOT_ARTICULATION_ROOT = "/Root/robot/run_robot"
 UR10_PRIM_PATH = "/Root/robot/run_robot/ur10"
@@ -37,12 +37,12 @@ BOOK_CREATE_POS = (-12.7, 5.2, 1.5)
 BOOK_SCALE = (0.15, 0.25, 0.04)
 
 # 동작 타이밍
-START_DELAY_S = 3.0
+START_DELAY_S = 4.0
 HOLD_APPROACH_S = 2.0
-HOLD_GRASP_S = 1.5
+HOLD_GRASP_S = 2.0
 HOLD_LIFT_S = 2.0
 HOLD_MOVE_S = 2.0
-HOLD_PLACE_S = 2.0
+HOLD_PLACE_S = 3.0
 
 # UR10 조인트 이름
 JOINT_NAMES = [
@@ -334,11 +334,19 @@ def main():
     move_robot_deg(POSE_PLACE_BLUE_DEG)
     hold_seconds(HOLD_PLACE_S, attached)
 
-    # attached = False
+    attached = False
 
-    # carb.log_warn(">> 0. READY (deg)")
-    # move_robot_deg(POSE_READY_DEG)
+    carb.log_warn(">> 6. PLACE 후 잠시 대기")
+    # move_robot_deg(POSE_PLACE_RED_DEG)
     # hold_seconds(HOLD_PLACE_S, attached)
+    # move_robot_deg(POSE_PLACE_YELLOW_DEG)
+    # hold_seconds(HOLD_PLACE_S, attached)
+    move_robot_deg(POSE_PLACE_BLUE_DEG)
+    hold_seconds(1, attached)
+
+    carb.log_warn(">> 0. READY (deg)")
+    move_robot_deg(POSE_READY_DEG)
+    hold_seconds(HOLD_PLACE_S, attached)
 
 
     carb.log_warn("[DONE] 작업 완료. 시뮬레이션 유지...")
