@@ -42,7 +42,7 @@ HOLD_APPROACH_S = 2.0
 HOLD_GRASP_S = 1.5
 HOLD_LIFT_S = 2.0
 HOLD_MOVE_S = 2.0
-HOLD_PLACE_S = 1.5
+HOLD_PLACE_S = 2.0
 
 # UR10 조인트 이름
 JOINT_NAMES = [
@@ -54,35 +54,37 @@ JOINT_NAMES = [
     "wrist_3_joint",
 ]
 
-# 관절 포즈 프리셋 (rad)
-POSE_APPROACH = np.array([-1.5, -1.20, 1.40, -1.80, -1.57, 0.20], dtype=np.float64)
-POSE_GRASP    = np.array([-1.5, -1.05, 1.55, -2.05, -1.57, 0.25], dtype=np.float64)
-POSE_LIFT     = POSE_APPROACH.copy()
-POSE_MOVE     = np.array([-3.4, -1.20, 1.35, -1.75, -1.57, -0.30], dtype=np.float64)
-POSE_PLACE    = np.array([-3.4, -1.05, 1.50, -2.00, -1.57, -0.28], dtype=np.float64)
+# ================================
+# 관절 포즈 프리셋 (deg)
+# - 아래 값들은 기존 rad 값을 deg로 "정확히" 변환한 값들
+# ================================
+POSE_READY_DEG    = [0, -90.0, -90.0, -90, 90.0, 0.0]
+POSE_APPROACH_DEG = [115, -90.0, -90.0, -90, 90.0, 0.0]
+POSE_GRASP_DEG  = [115, -123.0, -87.0, -60.0, 90.0, 0.0]
+POSE_LIFT_DEG     = [115, -90.0, -90.0, -90, 90.0, 0.0]
+POSE_MOVE_DEG     = POSE_READY_DEG.copy()
+POSE_PLACE_RED_DEG    = [5, -120.0, -90.0, -60, 90.0, 0.0]
+POSE_PLACE_YELLOW_DEG    = [7, -103.0, -122.0, -45, 90.0, 0.0]
+POSE_PLACE_BLUE_DEG    = [10, -70, -140.0, -55, 90.0, 0.0]
 
 # ================================
-# suction_cup 경로 (스크린샷 기준)
+# suction_cup 자동 탐색 키워드
 # ================================
-SUCTION_CUP_PATH = "/Root/robot/run_robot/ur10/ee_link/short_gripper/suction_cup"
+SUCTION_CUP_NAME = "suction_cup"
 
-# ================================
-# "suction_cup 아래 좌표계"로 붙이는 오프셋
-# - attached=True일 때:
-#   book_world = T_cup_world * [ATTACH_OFFSET_IN_CUP_FRAME, 1]
-# - suction_cup 끝 방향이 어느 축인지에 따라 조정 필요
-#   예) 끝이 cup의 -Z 방향이면 (0,0,-0.01)
-#       끝이 cup의 +Z 방향이면 (0,0,+0.01)
-# ================================
-ATTACH_OFFSET_IN_CUP_FRAME = np.array([0.0, 0.0, 0.05], dtype=np.float64)
+# suction_cup "로컬 좌표계"에서의 오프셋(끝에 붙는 느낌)
+ATTACH_OFFSET_IN_CUP_FRAME = np.array([0.0, 0.0, 0.01], dtype=np.float64)
 
-# 책 자세를 cup과 동일하게 맞출지 여부
-ATTACH_MATCH_CUP_ORIENTATION = True
+# 중요: 책 회전을 cup과 "동기화하지 않음"
+ATTACH_MATCH_CUP_ORIENTATION = False
 
 
 # ================================
 # 유틸리티 함수
 # ================================
+def deg2rad(deg_array):
+    return np.deg2rad(np.array(deg_array, dtype=np.float64))
+
 def get_stage() -> Usd.Stage:
     return omni.usd.get_context().get_stage()
 
@@ -139,6 +141,41 @@ def teleport_prim_to_pose(stage: Usd.Stage, prim_path: str, pos_xyz, quat_wxyz) 
 
     op_t.Set(Gf.Vec3d(float(pos_xyz[0]), float(pos_xyz[1]), float(pos_xyz[2])))
     op_r.Set(wxyz_to_quatf(quat_wxyz))
+
+
+def resolve_suction_cup_path(stage: Usd.Stage) -> str:
+    direct = EE_LINK_PATH + "/" + SUCTION_CUP_NAME
+    if prim_exists(stage, direct):
+        carb.log_warn(f"[CUP] found by direct path: {direct}")
+        return direct
+
+    ee = stage.GetPrimAtPath(EE_LINK_PATH)
+    if ee and ee.IsValid():
+        found = []
+        for p in Usd.PrimRange(ee):
+            if p.GetName() == SUCTION_CUP_NAME:
+                found.append(str(p.GetPath()))
+        if len(found) == 1:
+            carb.log_warn(f"[CUP] found under ee_link: {found[0]}")
+            return found[0]
+        if len(found) > 1:
+            found.sort(key=len)
+            carb.log_warn(f"[CUP] multiple found under ee_link, choose: {found[0]}")
+            return found[0]
+
+    global_found = []
+    for p in stage.Traverse():
+        if p.GetName() == SUCTION_CUP_NAME:
+            global_found.append(str(p.GetPath()))
+
+    if not global_found:
+        raise RuntimeError("suction_cup prim not found anywhere.")
+
+    prefer = [p for p in global_found if EE_LINK_PATH in p]
+    pick = (prefer[0] if prefer else global_found[0])
+
+    carb.log_warn(f"[CUP] found by global scan, choose: {pick}")
+    return pick
 
 
 # ================================
@@ -219,17 +256,23 @@ def main():
     )
     world.reset()
 
-    if not prim_exists(stage, SUCTION_CUP_PATH):
-        raise RuntimeError(f"suction_cup prim not found: {SUCTION_CUP_PATH}")
+    suction_cup_path = resolve_suction_cup_path(stage)
+    carb.log_warn(f"[CUP] final suction_cup path: {suction_cup_path}")
 
     ur10_indices = [ur10.get_dof_index(n) for n in JOINT_NAMES]
     current_action = None
 
-    def move_robot(q_rad):
+    attached_quat_wxyz = None
+
+    # deg 입력을 받아서 rad로 변환해 적용
+    def move_robot_deg(q_deg):
         nonlocal current_action
+        q_rad = deg2rad(q_deg)
         current_action = ArticulationAction(joint_positions=q_rad, joint_indices=ur10_indices)
 
     def hold_seconds(seconds: float, attached: bool):
+        nonlocal attached_quat_wxyz
+
         t0 = time.time()
         while simulation_app.is_running() and (time.time() - t0) < seconds:
             if current_action is not None:
@@ -237,19 +280,17 @@ def main():
 
             world.step(render=True)
 
-            # attached=True면:
-            # suction_cup 월드포즈를 기준으로 "cup 로컬 오프셋"을 월드로 변환해서 책을 텔레포트
             if attached:
-                cup_pos, cup_quat = get_world_pose(stage, SUCTION_CUP_PATH)
+                cup_pos, cup_quat = get_world_pose(stage, suction_cup_path)
+
                 R = quat_wxyz_to_rotmat(cup_quat)
                 offset_world = R @ ATTACH_OFFSET_IN_CUP_FRAME
                 book_pos = cup_pos + offset_world
 
-                if ATTACH_MATCH_CUP_ORIENTATION:
-                    book_quat = cup_quat
-                else:
-                    # 자세는 그대로 두고 위치만 따라가게 하고 싶으면 False로 두면 됨
-                    _, book_quat = get_world_pose(stage, BOOK_PRIM_PATH)
+                if attached_quat_wxyz is None:
+                    _, attached_quat_wxyz = get_world_pose(stage, BOOK_PRIM_PATH)
+
+                book_quat = attached_quat_wxyz if not ATTACH_MATCH_CUP_ORIENTATION else cup_quat
 
                 teleport_prim_to_pose(stage, BOOK_PRIM_PATH, book_pos, book_quat)
 
@@ -262,35 +303,43 @@ def main():
     carb.log_warn("[RUN] Pick & Place 시작!")
     attached = False
 
-    carb.log_warn(">> 1. APPROACH")
-    move_robot(POSE_APPROACH)
+    carb.log_warn(">> 0. READY (deg)")
+    move_robot_deg(POSE_READY_DEG)
     hold_seconds(HOLD_APPROACH_S, attached)
 
-    carb.log_warn(">> 2. GRASP")
-    move_robot(POSE_GRASP)
+    carb.log_warn(">> 1-2. APPROACH (deg)")
+    move_robot_deg(POSE_APPROACH_DEG)
+    hold_seconds(HOLD_APPROACH_S, attached)
+
+    carb.log_warn(">> 2. GRASP (deg)")
+    move_robot_deg(POSE_GRASP_DEG)
     hold_seconds(HOLD_GRASP_S, attached)
 
-    # 여기서부터 suction_cup 기준으로 텔레포트 추종
     attached = True
+    attached_quat_wxyz = None
 
-    carb.log_warn(">> 3. LIFT")
-    move_robot(POSE_LIFT)
+    carb.log_warn(">> 3. LIFT (deg)")
+    move_robot_deg(POSE_LIFT_DEG)
     hold_seconds(HOLD_LIFT_S, attached)
 
-    carb.log_warn(">> 4. MOVE")
-    move_robot(POSE_MOVE)
+    carb.log_warn(">> 4. MOVE (deg)")
+    move_robot_deg(POSE_MOVE_DEG)
     hold_seconds(HOLD_MOVE_S, attached)
 
-    carb.log_warn(">> 5. PLACE")
-    move_robot(POSE_PLACE)
+    carb.log_warn(">> 5. PLACE (deg)")
+    # move_robot_deg(POSE_PLACE_RED_DEG)
+    # hold_seconds(HOLD_PLACE_S, attached)
+    # move_robot_deg(POSE_PLACE_YELLOW_DEG)
+    # hold_seconds(HOLD_PLACE_S, attached)
+    move_robot_deg(POSE_PLACE_BLUE_DEG)
     hold_seconds(HOLD_PLACE_S, attached)
 
-    # 분리
-    attached = False
+    # attached = False
 
-    carb.log_warn(">> 6. RETREAT")
-    move_robot(POSE_LIFT)
-    hold_seconds(HOLD_LIFT_S, attached)
+    # carb.log_warn(">> 0. READY (deg)")
+    # move_robot_deg(POSE_READY_DEG)
+    # hold_seconds(HOLD_PLACE_S, attached)
+
 
     carb.log_warn("[DONE] 작업 완료. 시뮬레이션 유지...")
     while simulation_app.is_running():
