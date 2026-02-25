@@ -42,7 +42,7 @@ BOOK_SCALE = (0.15, 0.25, 0.04)
 
 # 스폰 설정 (딱 3번만 생성)
 MAX_BOOKS = 3
-SPAWN_INTERVAL = 7.0
+SPAWN_INTERVAL = 10.0
 BOOK_COLORS = [
     ("red", (1.0, 0.0, 0.0)),
     ("blue", (0.0, 0.0, 1.0)),
@@ -62,18 +62,20 @@ JOINT_NAMES = [
     "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
 ]
 
-# 관절 포즈 프리셋
-POSE_APPROACH = np.array([-1.5, -1.20, 1.40, -1.80, -1.57, 0.20], dtype=np.float64)
-POSE_GRASP    = np.array([-1.5, -1.05, 1.55, -2.05, -1.57, 0.25], dtype=np.float64)
-POSE_LIFT     = POSE_APPROACH.copy()
-POSE_MOVE     = np.array([-2.5, -1.20, 1.35, -1.75, -1.57, -0.30], dtype=np.float64) # 중간 안전 거점
+# ================================
+# 관절 포즈 프리셋 (deg)
+# - standalone_another_dimension.py의 값을 기반으로 변환
+# ================================
+POSE_READY_DEG    = [0, -90.0, -90.0, -90, 90.0, 0.0]
+POSE_APPROACH_DEG = [115, -90.0, -90.0, -90, 90.0, 0.0]
+POSE_GRASP_DEG    = [115, -123.0, -87.0, -60.0, 90.0, 0.0]
+POSE_LIFT_DEG     = [115, -90.0, -90.0, -90, 90.0, 0.0]
+POSE_MOVE_DEG     = [0, -90.0, -90.0, -90, 90.0, 0.0]
 
-# 색상별 Place 목표 좌표 (KLT 상자 위치에 맞게 Pan 각도 분배)
-POSES_PLACE = {
-    "red":    np.array([-3.40, -1.05, 1.50, -2.00, -1.57, -0.28], dtype=np.float64), # small_KLT
-    "blue":   np.array([-3.20, -1.05, 1.50, -2.00, -1.57, -0.28], dtype=np.float64), # small_KLT_01
-    "yellow": np.array([-3.00, -1.05, 1.50, -2.00, -1.57, -0.28], dtype=np.float64)  # small_KLT_02
-}
+# 색상별 Place 목표 좌표 (deg)
+POSE_PLACE_RED_DEG    = [5, -120.0, -90.0, -60, 90.0, 0.0]
+POSE_PLACE_YELLOW_DEG = [7, -103.0, -122.0, -45, 90.0, 0.0]
+POSE_PLACE_BLUE_DEG   = [10, -70, -140.0, -55, 90.0, 0.0]
 
 # KLT 상자 이름 매핑
 KLT_NAMES = {
@@ -89,6 +91,10 @@ ATTACH_OFFSET_IN_CUP_FRAME = np.array([0.0, 0.0, 0.05], dtype=np.float64)
 # ================================
 # 유틸리티 함수
 # ================================
+def deg2rad(deg_array):
+    """deg 배열을 rad로 변환"""
+    return np.deg2rad(np.array(deg_array, dtype=np.float64))
+
 def get_stage() -> Usd.Stage:
     return omni.usd.get_context().get_stage()
 
@@ -292,7 +298,9 @@ class UR10PickAndPlaceApp:
         rb = UsdPhysics.RigidBodyAPI(new_prim)
         if rb: rb.GetRigidBodyEnabledAttr().Set(True)
 
-    def set_target_pose(self, q_rad: np.ndarray):
+    def set_target_pose_deg(self, q_deg: list):
+        """deg 배열을 받아서 rad로 변환 후 설정"""
+        q_rad = deg2rad(q_deg)
         self.current_action = ArticulationAction(joint_positions=q_rad, joint_indices=self.ur10_indices)
 
     def hold_seconds(self, seconds: float):
@@ -335,8 +343,14 @@ class UR10PickAndPlaceApp:
             self.books_queue.pop(0)
             carb.log_warn(f"\n🎯 [ARRIVAL] {target_book} 도착! 픽앤플레이스 시작")
             
+            # 0. READY (초기 자세)
+            carb.log_warn(">> 0. READY (deg)")
+            self.set_target_pose_deg(POSE_READY_DEG)
+            self.hold_seconds(HOLD_APPROACH_S)
+
             # 1. APPROACH (접근)
-            self.set_target_pose(POSE_APPROACH)
+            carb.log_warn(">> 1. APPROACH (deg)")
+            self.set_target_pose_deg(POSE_APPROACH_DEG)
             self.hold_seconds(HOLD_APPROACH_S)
 
             # 📸 2. 비전 카메라로 색상 인식
@@ -344,31 +358,41 @@ class UR10PickAndPlaceApp:
             carb.log_warn(f"👁️‍🗨️ [VISION] 인식된 책 색상: {detected_color.upper()}")
 
             # 3. GRASP (내려가서 잡기)
-            self.set_target_pose(POSE_GRASP)
+            carb.log_warn(">> 2. GRASP (deg)")
+            self.set_target_pose_deg(POSE_GRASP_DEG)
             self.hold_seconds(HOLD_GRASP_S)
 
             # 🔗 부착
             active_book_path = self.attach_book(target_book)
 
             # 4. LIFT (들어올리기)
-            self.set_target_pose(POSE_LIFT)
+            carb.log_warn(">> 3. LIFT (deg)")
+            self.set_target_pose_deg(POSE_LIFT_DEG)
             self.hold_seconds(HOLD_LIFT_S)
 
             # 5. MOVE (이동)
-            self.set_target_pose(POSE_MOVE)
+            carb.log_warn(">> 4. MOVE (deg)")
+            self.set_target_pose_deg(POSE_MOVE_DEG)
             self.hold_seconds(HOLD_MOVE_S)
 
             # 6. PLACE (색상에 맞춰 KLT 상자로 이동)
-            target_place_pose = POSES_PLACE[detected_color]
+            carb.log_warn(f">> 5. PLACE (deg) - {detected_color.upper()}")
+            if detected_color == "red":
+                target_place_pose = POSE_PLACE_RED_DEG
+            elif detected_color == "yellow":
+                target_place_pose = POSE_PLACE_YELLOW_DEG
+            else:  # blue
+                target_place_pose = POSE_PLACE_BLUE_DEG
+            
             klt_name = KLT_NAMES[detected_color]
             
             # 디버깅 출력: 목표 좌표와 KLT 상자 이름
             carb.log_warn(f"📦 [PLACE_DEBUG] 색상: {detected_color.upper()}")
             carb.log_warn(f"📦 [PLACE_DEBUG] 목표 KLT 상자: {klt_name}")
-            carb.log_warn(f"📦 [PLACE_DEBUG] 목표 관절각도: J1={target_place_pose[0]:.3f}, J2={target_place_pose[1]:.3f}, J3={target_place_pose[2]:.3f}, J4={target_place_pose[3]:.3f}, J5={target_place_pose[4]:.3f}, J6={target_place_pose[5]:.3f}")
+            carb.log_warn(f"📦 [PLACE_DEBUG] 목표 관절각도(deg): J1={target_place_pose[0]:.1f}, J2={target_place_pose[1]:.1f}, J3={target_place_pose[2]:.1f}, J4={target_place_pose[3]:.1f}, J5={target_place_pose[4]:.1f}, J6={target_place_pose[5]:.1f}")
             carb.log_warn(f"📦 [PLACE_START] {detected_color.upper()} 상자({klt_name})로 이동합니다.")
             
-            self.set_target_pose(target_place_pose)
+            self.set_target_pose_deg(target_place_pose)
             self.hold_seconds(HOLD_PLACE_S)
 
             # 🔓 분리
@@ -376,7 +400,8 @@ class UR10PickAndPlaceApp:
             carb.log_warn(f"✨ [PLACE_COMPLETE] {detected_color.upper()} 상자에 성공적으로 배치했습니다!")
 
             # 7. RETREAT (복귀)
-            self.set_target_pose(POSE_LIFT)
+            carb.log_warn(">> 6. RETREAT (deg)")
+            self.set_target_pose_deg(POSE_LIFT_DEG)
             self.hold_seconds(HOLD_LIFT_S)
 
     def run(self):
