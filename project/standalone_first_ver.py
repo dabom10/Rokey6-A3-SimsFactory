@@ -71,7 +71,7 @@ BOOKS = {
 }
 
 # Book spawn 간격 (초)
-BOOK_SPAWN_INTERVAL_S = 10.0
+BOOK_SPAWN_INTERVAL_S = 1.0
 
 # 동작 타이밍
 START_DELAY_S = 4.0
@@ -540,14 +540,14 @@ def pick_and_place_book(
     move_robot_deg(POSE_APPROACH_DEG)
     hold_seconds(HOLD_APPROACH_S, attached)
 
-    # [DEBUG] 카메라 시야 확인용 반복 루프
-    carb.log_warn(f">> {book_name} [DEBUG] ================================================")
-    carb.log_warn(f">> {book_name} [DEBUG] 카메라 시야각 조정 모드 진입 (10초)")
-    carb.log_warn(f">> {book_name} [DEBUG] 이 시간 동안 시뮬레이션에서:")
-    carb.log_warn(f">> {book_name} [DEBUG]   1. 카메라의 위치/회전을 조정하세요")
-    carb.log_warn(f">> {book_name} [DEBUG]   2. 매 1초마다 색상 탐지를 시도합니다")
-    carb.log_warn(f">> {book_name} [DEBUG]   3. 로그를 보고 각 색상의 픽셀 수를 확인하세요")
-    carb.log_warn(f">> {book_name} [DEBUG] ================================================")
+    # # [DEBUG] 카메라 시야 확인용 반복 루프
+    # carb.log_warn(f">> {book_name} [DEBUG] ================================================")
+    # carb.log_warn(f">> {book_name} [DEBUG] 카메라 시야각 조정 모드 진입 (10초)")
+    # carb.log_warn(f">> {book_name} [DEBUG] 이 시간 동안 시뮬레이션에서:")
+    # carb.log_warn(f">> {book_name} [DEBUG]   1. 카메라의 위치/회전을 조정하세요")
+    # carb.log_warn(f">> {book_name} [DEBUG]   2. 매 1초마다 색상 탐지를 시도합니다")
+    # carb.log_warn(f">> {book_name} [DEBUG]   3. 로그를 보고 각 색상의 픽셀 수를 확인하세요")
+    # carb.log_warn(f">> {book_name} [DEBUG] ================================================")
     
     move_robot_deg(POSE_APPROACH_DEG)
     
@@ -555,7 +555,7 @@ def pick_and_place_book(
     debug_start = time.time()
     detection_attempt = 0
     
-    while simulation_app.is_running() and (time.time() - debug_start) < 10.0:
+    while simulation_app.is_running() and (time.time() - debug_start) < 3.0:
         if current_action is not None:
             ur10.apply_action(current_action)
         
