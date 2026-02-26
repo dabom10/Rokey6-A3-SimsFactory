@@ -11,6 +11,10 @@ from collections import defaultdict
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
 
+# ROS2 bridge extension 수동 활성화
+import omni.kit.app
+omni.kit.app.get_app().get_extension_manager().set_extension_enabled_immediate("isaacsim.ros2.bridge", True)
+
 import carb
 import omni.usd
 import omni.timeline
@@ -18,10 +22,6 @@ import omni.timeline
 from pxr import Usd, UsdGeom, Gf, Sdf, UsdPhysics
 
 from isaacsim.core.api import World
-# ★ SingleManipulator 대신 SingleArticulation 사용
-#   이유: ur10은 독립 ArticulationRoot가 아니라
-#         /Root/robot/robot (carter+ur10 통합) ArticulationRoot 하위에 포함됨.
-#         SingleManipulator는 prim_path 자체가 ArticulationRoot여야 하므로 사용 불가.
 from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.utils.types import ArticulationAction
 
@@ -31,14 +31,10 @@ from isaacsim.core.utils.types import ArticulationAction
 # ================================
 ENV_USD_PATH = "/home/rokey/Rokey6-A3-SimsFactory/project/environment_carter.usd"
 
-# ★ ArticulationRoot는 carter+ur10 통합 prim
 ROBOT_ARTICULATION_ROOT = "/Root/robot/robot"
+EE_LINK_PATH            = "/Root/robot/robot/nova_carter/ur10/ee_link"
+CAMERA_PRIM_PATH        = "/Root/robot/robot/nova_carter/ur10/ee_link/short_gripper/Camera"
 
-# ★ 아래 경로들은 get_world_pose / suction_cup 탐색에만 사용 (articulation 등록 X)
-EE_LINK_PATH     = "/Root/robot/robot/nova_carter/ur10/ee_link"
-CAMERA_PRIM_PATH = "/Root/robot/robot/nova_carter/ur10/ee_link/short_gripper/Camera"
-
-# UR10 전용 ActionGraph 없음
 GRAPH_UR10 = None
 
 BOOK_SPAWN_POS = (-12.7, 5.2, 1.5)
@@ -78,7 +74,9 @@ HOLD_LIFT_S     = 2.0
 HOLD_MOVE_S     = 2.0
 HOLD_PLACE_S    = 3.0
 
-# ★ ur10 6개 조인트 이름 (articulation 전체 DOF 중에서 이름으로 인덱스를 찾음)
+# 색상 탐지 대기 시간 (초) - APPROACH 후 카메라 안정화 대기
+COLOR_DETECT_WAIT_S = 3.0
+
 JOINT_NAMES = [
     "shoulder_pan_joint",
     "shoulder_lift_joint",
@@ -97,9 +95,9 @@ POSE_PLACE_RED_DEG    = [5,   -120.0,  -90.0,  -60,   90.0, 0.0]
 POSE_PLACE_YELLOW_DEG = [7,   -103.0, -122.0,  -45,   90.0, 0.0]
 POSE_PLACE_BLUE_DEG   = [10,   -70,   -140.0,  -55,   90.0, 0.0]
 
-SUCTION_CUP_NAME              = "suction_cup"
-ATTACH_OFFSET_IN_CUP_FRAME    = np.array([0.0, 0.0, 0.01], dtype=np.float64)
-ATTACH_MATCH_CUP_ORIENTATION  = False
+SUCTION_CUP_NAME             = "suction_cup"
+ATTACH_OFFSET_IN_CUP_FRAME   = np.array([0.0, 0.0, 0.01], dtype=np.float64)
+ATTACH_MATCH_CUP_ORIENTATION = False
 
 
 # ================================
@@ -128,6 +126,7 @@ class place2amr:
         hold_lift_s,
         hold_move_s,
         hold_place_s,
+        color_detect_wait_s=3.0,
         debug_dir="/tmp/camera_debug",
     ):
         self.env_usd_path            = env_usd_path
@@ -148,19 +147,20 @@ class place2amr:
         self.attach_offset_in_cup_frame   = attach_offset_in_cup_frame.astype(np.float64).copy()
         self.attach_match_cup_orientation = bool(attach_match_cup_orientation)
 
-        self.start_delay_s   = float(start_delay_s)
-        self.hold_approach_s = float(hold_approach_s)
-        self.hold_grasp_s    = float(hold_grasp_s)
-        self.hold_lift_s     = float(hold_lift_s)
-        self.hold_move_s     = float(hold_move_s)
-        self.hold_place_s    = float(hold_place_s)
+        self.start_delay_s      = float(start_delay_s)
+        self.hold_approach_s    = float(hold_approach_s)
+        self.hold_grasp_s       = float(hold_grasp_s)
+        self.hold_lift_s        = float(hold_lift_s)
+        self.hold_move_s        = float(hold_move_s)
+        self.hold_place_s       = float(hold_place_s)
+        self.color_detect_wait_s = float(color_detect_wait_s)
 
         self.debug_dir = debug_dir
 
         self.stage            = None
         self.world            = None
-        self.robot_art        = None   # SingleArticulation (carter+ur10 전체)
-        self.ur10_indices     = None   # ur10 6개 joint 의 DOF index 리스트
+        self.robot_art        = None
+        self.ur10_indices     = None
         self.suction_cup_path = None
 
     # ----------------------------
@@ -229,6 +229,15 @@ class place2amr:
 
         op_t.Set(Gf.Vec3d(float(pos_xyz[0]), float(pos_xyz[1]), float(pos_xyz[2])))
         op_r.Set(place2amr.wxyz_to_quatf(quat_wxyz))
+
+    # ----------------------------
+    # ActionGraph 상태 디버그
+    # ----------------------------
+    def _check_ag_status(self, label: str):
+        for prim in self.stage.Traverse():
+            if prim.GetTypeName() == "OmniGraph":
+                status = "ACTIVE" if prim.IsActive() else "INACTIVE"
+                carb.log_warn(f"[AG {label}] {status}  {prim.GetPath()}")
 
     # ----------------------------
     # suction_cup prim 탐색
@@ -428,22 +437,31 @@ class place2amr:
         move_robot_deg(self.poses["approach"])
         hold_seconds(self.hold_approach_s, attached)
 
-        # 색상 탐지
+        # 색상 탐지: color_detect_wait_s 동안 1초마다 시도, 성공하면 즉시 종료
+        carb.log_warn(f">> {book_name} 색상 탐지 시작 (최대 {self.color_detect_wait_s:.0f}초)")
+        detected_color    = "unknown"
         debug_start       = time.time()
         detection_attempt = 0
-        while simulation_app.is_running() and (time.time() - debug_start) < 3.0:
+        while simulation_app.is_running() and (time.time() - debug_start) < self.color_detect_wait_s:
             if current_action is not None:
                 robot_art.apply_action(current_action)
             world.step(render=True)
             elapsed = int(time.time() - debug_start)
             if elapsed != detection_attempt:
                 detection_attempt = elapsed
-                carb.log_warn(f">> {book_name} [DEBUG] [{elapsed}초] 색상 탐지 시도...")
+                carb.log_warn(f">> {book_name} [COLOR] [{elapsed}초] 탐지 시도...")
                 img = self.get_camera_image(stage, self.camera_prim_path)
                 if img is not None:
-                    self.detect_book_color(img)
+                    result = self.detect_book_color(img)
+                    if result != "unknown":
+                        detected_color = result
+                        carb.log_warn(f">> {book_name} [COLOR] 조기 탐지 성공: {detected_color} → 대기 종료")
+                        break
 
-        detected_color = self.capture_and_detect_color(stage, self.camera_prim_path, book_name)
+        # 탐지 실패 시 최종 1회 재시도
+        if detected_color == "unknown":
+            carb.log_warn(f">> {book_name} [COLOR] 최종 재시도...")
+            detected_color = self.capture_and_detect_color(stage, self.camera_prim_path, book_name)
         carb.log_warn(f">> {book_name} 최종 탐지 색상: {detected_color}")
 
         carb.log_warn(f">> {book_name} 2. GRASP")
@@ -488,47 +506,40 @@ class place2amr:
         simulation_app.update()
 
         self.stage = self.get_stage()
-
-        # Carter AMR ActionGraph 비활성화 (ROS2 cmd_vel 간섭 방지)
-        for ag_path in [
-            "/Root/robot/robot/nova_carter/ActionGraph_differential",
-            "/Root/robot/robot/nova_carter/ActionGraph_tf_odom",
-            "/Root/robot/robot/nova_carter/ActionGraph_lidar",
-        ]:
-            ag = self.stage.GetPrimAtPath(ag_path)
-            if ag and ag.IsValid():
-                ag.SetActive(False)
-                carb.log_warn(f"[INIT] ActionGraph 비활성화: {ag_path}")
+        self._check_ag_status("1_after_open_stage")
 
         self.fix_ur10_stiffness(self.stage)
+        self._check_ag_status("2_after_fix_stiffness")
 
         self.world = World(physics_dt=1/60, rendering_dt=1/60)
+        self._check_ag_status("3_after_world_create")
 
-        # ★ 핵심 수정:
-        #   ArticulationRoot인 /Root/robot/robot 을 SingleArticulation 으로 등록.
-        #   ur10은 이 articulation의 DOF subset이므로 joint 이름으로 인덱스를 찾아 제어.
         self.robot_art = self.world.scene.add(
             SingleArticulation(
                 prim_path=self.robot_articulation_root,
                 name="carter_ur10",
             )
         )
+        self._check_ag_status("4_after_scene_add")
+
         self.world.reset()
+        self._check_ag_status("5_after_world_reset")
 
         self.suction_cup_path = self.resolve_suction_cup_path(self.stage)
         carb.log_warn(f"[CUP] suction_cup path: {self.suction_cup_path}")
 
-        # articulation 전체 DOF 목록에서 ur10 joint 인덱스만 추출
         self.ur10_indices = [
             self.robot_art.get_dof_index(n) for n in self.joint_names
         ]
         carb.log_warn(f"[INIT] ur10 DOF indices: {list(zip(self.joint_names, self.ur10_indices))}")
 
         omni.timeline.get_timeline_interface().play()
+        self._check_ag_status("6_after_timeline_play")
 
         carb.log_warn(f"[WAIT] 초기 안정화 {self.start_delay_s:.1f}초 대기...")
         for _ in range(int(self.start_delay_s * 60)):
             self.world.step(render=True)
+        self._check_ag_status("7_after_wait")
 
     def run(self):
         self._open_stage_and_init()
@@ -588,6 +599,7 @@ if __name__ == "__main__":
         hold_lift_s=HOLD_LIFT_S,
         hold_move_s=HOLD_MOVE_S,
         hold_place_s=HOLD_PLACE_S,
+        color_detect_wait_s=COLOR_DETECT_WAIT_S,
         debug_dir="/tmp/camera_debug",
     )
 
