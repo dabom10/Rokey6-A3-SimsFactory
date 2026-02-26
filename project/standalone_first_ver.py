@@ -25,14 +25,14 @@ from isaacsim.core.utils.types import ArticulationAction
 # ================================
 # 설정 상수 (클래스 밖)
 # ================================
-ENV_USD_PATH = "/home/kyb/Rokey6-A3-SimsFactory/project/environment.usd"
+ENV_USD_PATH = "/home/kyb/Rokey6-A3-SimsFactory/project/environment_carter.usd"
 
-ROBOT_ARTICULATION_ROOT = "/Root/robot/run_robot"
-UR10_PRIM_PATH = "/Root/robot/run_robot/ur10"
-EE_LINK_PATH = "/Root/robot/run_robot/ur10/ee_link"
-CAMERA_PRIM_PATH = "/Root/robot/run_robot/ur10/ee_link/short_gripper/Camera"
+ROBOT_ARTICULATION_ROOT = "/Root/robot/nova_carter"
+UR10_PRIM_PATH = "/Root/robot/nova_carter/ur10"
+EE_LINK_PATH = "/Root/robot/nova_carter/ur10/ee_link"
+CAMERA_PRIM_PATH = "/Root/robot/nova_carter/ur10/ee_link/short_gripper/Camera"
 
-GRAPH_UR10 = "/Root/robot/run_robot/ur10/Graphs/Graphs/Position_Controller"
+GRAPH_UR10 = "/Root/robot/ur10/Graphs/Graphs/Position_Controller"
 
 BOOK_SPAWN_POS = (-12.7, 5.2, 1.5)
 BOOK_SCALE = (0.15, 0.25, 0.04)
@@ -596,7 +596,7 @@ class place2amr:
         self.world = World(physics_dt=1/60, rendering_dt=1/60)
         self.ur10 = self.world.scene.add(
             SingleManipulator(
-                prim_path=self.robot_articulation_root,
+                prim_path=UR10_PRIM_PATH,
                 name="ur10",
                 end_effector_prim_path=self.ee_link_path,
             )
