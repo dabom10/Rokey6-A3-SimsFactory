@@ -7,6 +7,7 @@ import traceback
 import numpy as np
 
 from isaacsim import SimulationApp
+
 simulation_app = SimulationApp({"headless": False})
 
 import carb
@@ -15,14 +16,14 @@ import omni.timeline
 
 from pxr import Usd, UsdGeom, Gf, Sdf
 from isaacsim.core.api import World
-from isaacsim.robot.manipulators import SingleManipulator
+from isaacsim.core.prims import SingleArticulation
 from isaacsim.core.utils.types import ArticulationAction
 
 
 # ================================
 # 코드에서 장소 지정 (터미널 X)
 # ================================
-PLACE = "B"   # "A"=red, "B"=yellow, "C"=blue
+PLACE = "B"  # "A"=red, "B"=yellow, "C"=blue
 
 
 # ================================
@@ -30,17 +31,32 @@ PLACE = "B"   # "A"=red, "B"=yellow, "C"=blue
 # ================================
 ENV_USD_PATH = "/home/kyb/Rokey6-A3-SimsFactory/project/environment_carter_shelf.usd"
 
-ROBOT_ARTICULATION_ROOT = "/Root/robot/nova_carter"
-EE_LINK_PATH = "/Root/robot/nova_carter/ur10/ee_link"
-GRAPH_UR10 = "/Root/robot/run_robot/ur10/Graphs/Graphs/Position_Controller"
+# 이 USD 구조에서는 carter + ur10 이 하나의 articulation으로 묶여있음
+# (Stage에서 /Root/robot/robot 이 ArticulationRoot 인 경우)
+ROBOT_ARTICULATION_ROOT = "/Root/robot/robot"
 
-# 씬에 존재하는 책 prim 경로들 (노/파 포함)
+# suction / world pose 계산에만 사용
+EE_LINK_PATH = "/Root/robot/robot/nova_carter/ur10/ee_link"
+
+# 이 씬에서는 run_robot/Graphs 경로가 없을 수 있으니 기본 None 처리
+GRAPH_UR10 = None
+
+# Carter ActionGraph(있는 경우) 비활성화해서 간섭 방지
+DISABLE_CARTER_ACTIONGRAPHS = True
+CARTER_ACTIONGRAPH_PATHS = [
+    "/Root/robot/robot/nova_carter/ActionGraph_differential",
+    "/Root/robot/robot/nova_carter/ActionGraph_tf_odom",
+    "/Root/robot/robot/nova_carter/ActionGraph_lidar",
+]
+
+# 씬에 존재하는 책 prim 경로들
 BOOKS = {
     "red": "/Root/red_book",
     "yellow": "/Root/yellow_book",
     "blue": "/Root/blue_book",
 }
 
+# UR10 6개 조인트 이름
 JOINT_NAMES = [
     "shoulder_pan_joint",
     "shoulder_lift_joint",
@@ -53,9 +69,7 @@ JOINT_NAMES = [
 # 시작 자세(항상)
 POSE_READY_DEG = [0, -90.0, -90.0, -90, 90.0, 0.0]
 
-# ================================
 # 책을 잡는(픽업) 자세: 색상별
-# ================================
 POSE_PICK_RED_DEG = [5, -127.0, -92.0, -53, 90.0, 0.0]
 POSE_PICK_YELLOW_DEG = [7, -97.0, -118.0, -50, 90.0, 0.0]
 POSE_PICK_BLUE_DEG = [10, -70, -140.0, -55, 90.0, 0.0]
@@ -66,9 +80,7 @@ POSE_PICK_BY_COLOR = {
     "blue": POSE_PICK_BLUE_DEG,
 }
 
-# ================================
-# MID 자세: 색상별 (픽업처럼 다르게)
-# ================================
+# MID 자세: 색상별
 POSE_MID_RED_DEG = [5, -110.0, -78.0, -79, 90.0, 0.0]
 POSE_MID_YELLOW_DEG = [5, -110.0, -78.0, -79, 90.0, 0.0]
 POSE_MID_BLUE_DEG = [0, 0, 0, 0, 0, 0]  # 필요하면 채우기
@@ -79,9 +91,7 @@ POSE_MID_BY_COLOR = {
     "blue": POSE_MID_BLUE_DEG,
 }
 
-# ================================
 # 선반 이동/놓기 자세
-# ================================
 POSE_2SHELF_DEG = [90, -120.0, -70.0, -90, 180.0, -15.0]
 POSE_PLACE2SHELF_DEG = [90, -140.0, -70.0, -70, 180.0, -15.0]
 
@@ -102,7 +112,7 @@ class amr2shelf:
         env_usd_path: str,
         robot_articulation_root: str,
         ee_link_path: str,
-        graph_ur10: str,
+        graph_ur10,
         joint_names: list,
         books: dict,
         place: str,
@@ -118,12 +128,14 @@ class amr2shelf:
         hold_move_s: float,
         hold_attach_s: float,
         hold_detach_s: float,
+        disable_carter_actiongraphs: bool,
+        carter_actiongraph_paths: list,
     ):
         self.env_usd_path = env_usd_path
         self.robot_articulation_root = robot_articulation_root
         self.ee_link_path = ee_link_path
         self.graph_ur10 = graph_ur10
-        self.joint_names = joint_names
+        self.joint_names = list(joint_names)
 
         self.books = dict(books)
 
@@ -160,9 +172,12 @@ class amr2shelf:
         self.hold_attach_s = float(hold_attach_s)
         self.hold_detach_s = float(hold_detach_s)
 
+        self.disable_carter_actiongraphs = bool(disable_carter_actiongraphs)
+        self.carter_actiongraph_paths = list(carter_actiongraph_paths)
+
         self.stage = None
         self.world = None
-        self.arm = None
+        self.art = None
         self.arm_indices = None
         self.suction_cup_path = None
 
@@ -202,17 +217,27 @@ class amr2shelf:
         xf = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
         return xf
 
+    @staticmethod
+    def _assert_prim(stage, prim_path: str, tag: str):
+        prim = stage.GetPrimAtPath(prim_path)
+        if (not prim) or (not prim.IsValid()):
+            raise RuntimeError(f"[PATH] {tag} prim not found: {prim_path}")
+        return prim
+
     def resolve_suction_cup_path(self, stage):
         direct = self.ee_link_path + "/" + self.suction_cup_name
         if self.prim_exists(stage, direct):
             return direct
+
         for p in stage.Traverse():
             if p.GetName() == self.suction_cup_name:
                 return str(p.GetPath())
+
         raise RuntimeError("suction_cup prim not found")
 
     def _move_prim(self, src_path: str, dst_path: str) -> None:
         import omni.kit.commands as commands
+
         commands.execute("MovePrim", path_from=src_path, path_to=dst_path)
 
     def ensure_grasp_frame(self) -> str:
@@ -314,7 +339,7 @@ class amr2shelf:
     def _apply_arm_deg(self, q_deg):
         q_rad = self.deg2rad(q_deg)
         action = ArticulationAction(joint_positions=q_rad, joint_indices=self.arm_indices)
-        self.arm.apply_action(action)
+        self.art.apply_action(action)
 
     def _hold(self, seconds, q_deg=None):
         t0 = time.time()
@@ -324,7 +349,7 @@ class amr2shelf:
             self.world.step(render=True)
 
     def run_sequence(self):
-        for c in ("yellow", "blue"):
+        for c in ("red", "yellow", "blue"):
             p = self.books.get(c, "")
             if p:
                 carb.log_warn(f"[CHECK] {c} exists? {self.prim_exists(self.stage, p)} : {p}")
@@ -343,6 +368,7 @@ class amr2shelf:
         carb.log_warn("1) PICK pose")
         self._hold(self.hold_move_s, self.pose_pick_deg)
 
+        # 아래 시퀀스는 필요할 때 주석 해제
         # carb.log_warn("2) ATTACH")
         # self.attach_book_to_cup()
         # self._hold(self.hold_attach_s, self.pose_pick_deg)
@@ -368,27 +394,47 @@ class amr2shelf:
             raise FileNotFoundError(self.env_usd_path)
 
         from isaacsim.core.utils.stage import open_stage
+
+        carb.log_warn(f"[STAGE] open_stage: {self.env_usd_path}")
         open_stage(self.env_usd_path)
         simulation_app.update()
 
         self.stage = self.get_stage()
 
-        og_prim = self.stage.GetPrimAtPath(self.graph_ur10)
-        if og_prim and og_prim.IsValid():
-            og_prim.SetActive(False)
+        self._assert_prim(self.stage, self.robot_articulation_root, "ROBOT_ARTICULATION_ROOT")
+        self._assert_prim(self.stage, self.ee_link_path, "EE_LINK_PATH")
 
-        self.world = World(physics_dt=1/60, rendering_dt=1/60)
-        self.arm = self.world.scene.add(
-            SingleManipulator(
+        if self.disable_carter_actiongraphs:
+            for ag_path in self.carter_actiongraph_paths:
+                ag = self.stage.GetPrimAtPath(ag_path)
+                if ag and ag.IsValid():
+                    ag.SetActive(False)
+                    carb.log_warn(f"[INIT] ActionGraph disabled: {ag_path}")
+
+        if self.graph_ur10:
+            og_prim = self.stage.GetPrimAtPath(self.graph_ur10)
+            if og_prim and og_prim.IsValid():
+                og_prim.SetActive(False)
+                carb.log_warn(f"[INIT] OmniGraph disabled: {self.graph_ur10}")
+
+        self.world = World(physics_dt=1 / 60, rendering_dt=1 / 60)
+
+        # 통합 articulation 등록 (carter + ur10)
+        self.art = self.world.scene.add(
+            SingleArticulation(
                 prim_path=self.robot_articulation_root,
-                name="ur10",
-                end_effector_prim_path=self.ee_link_path,
+                name="carter_ur10",
             )
         )
+
         self.world.reset()
 
         self.suction_cup_path = self.resolve_suction_cup_path(self.stage)
-        self.arm_indices = [self.arm.get_dof_index(n) for n in self.joint_names]
+        carb.log_warn(f"[CUP] suction_cup path: {self.suction_cup_path}")
+
+        # ur10 조인트 인덱스만 추출
+        self.arm_indices = [self.art.get_dof_index(n) for n in self.joint_names]
+        carb.log_warn(f"[INIT] ur10 DOF indices: {list(zip(self.joint_names, self.arm_indices))}")
 
         omni.timeline.get_timeline_interface().play()
 
@@ -424,6 +470,8 @@ if __name__ == "__main__":
         hold_move_s=HOLD_MOVE_S,
         hold_attach_s=HOLD_ATTACH_S,
         hold_detach_s=HOLD_DETACH_S,
+        disable_carter_actiongraphs=DISABLE_CARTER_ACTIONGRAPHS,
+        carter_actiongraph_paths=CARTER_ACTIONGRAPH_PATHS,
     )
 
     try:
