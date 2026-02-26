@@ -23,7 +23,7 @@ from isaacsim.core.utils.types import ArticulationAction
 # ================================
 # 코드에서 장소 지정 (터미널 X)
 # ================================
-PLACE = "B"  # "A"=red, "B"=yellow, "C"=blue
+PLACE = "C"  # "A"=red, "B"=yellow, "C"=blue
 
 
 # ================================
@@ -71,8 +71,8 @@ POSE_READY_DEG = [0, -90.0, -90.0, -90, 90.0, 0.0]
 
 # 책을 잡는(픽업) 자세: 색상별
 POSE_PICK_RED_DEG = [5, -127.0, -92.0, -53, 90.0, 0.0]
-POSE_PICK_YELLOW_DEG = [7, -105.0, -118.0, -52, 90.0, 0.0]
-POSE_PICK_BLUE_DEG = [10, -70, -140.0, -55, 90.0, 0.0]
+POSE_PICK_YELLOW_DEG = [7, -105.0, -121.0, -45, 90.0, 0.0]
+POSE_PICK_BLUE_DEG = [10, -85, -145.0, -40, 90.0, 0.0]
 
 POSE_PICK_BY_COLOR = {
     "red": POSE_PICK_RED_DEG,
@@ -82,8 +82,8 @@ POSE_PICK_BY_COLOR = {
 
 # MID 자세: 색상별
 POSE_MID_RED_DEG = [5, -110.0, -78.0, -79, 90.0, 0.0]
-POSE_MID_YELLOW_DEG = [5, -110.0, -78.0, -79, 90.0, 0.0]
-POSE_MID_BLUE_DEG = [0, 0, 0, 0, 0, 0]  # 필요하면 채우기
+POSE_MID_YELLOW_DEG = [7, -90.0, -110.0, -70, 90.0, 0.0]
+POSE_MID_BLUE_DEG = [10, -66, -130.0, -72, 90.0, 0.0]
 
 POSE_MID_BY_COLOR = {
     "red": POSE_MID_RED_DEG,
@@ -100,8 +100,8 @@ ATTACH_OFFSET_IN_CUP_FRAME = np.array([0.0, 0.0, 0.01], dtype=np.float64)
 
 # 타이밍
 START_DELAY_S = 2.0
-READY_BEFORE_ACTION_WAIT_S = 2.0
-HOLD_MOVE_S = 2.0
+READY_BEFORE_ACTION_WAIT_S = 1.0
+HOLD_MOVE_S = 3.0
 HOLD_ATTACH_S = 0.6
 HOLD_DETACH_S = 0.6
 
@@ -368,26 +368,25 @@ class amr2shelf:
         carb.log_warn("1) PICK pose")
         self._hold(self.hold_move_s, self.pose_pick_deg)
 
-        # 아래 시퀀스는 필요할 때 주석 해제
-        # carb.log_warn("2) ATTACH")
-        # self.attach_book_to_cup()
-        # self._hold(self.hold_attach_s, self.pose_pick_deg)
+        carb.log_warn("2) ATTACH")
+        self.attach_book_to_cup()
+        self._hold(self.hold_attach_s, self.pose_pick_deg)
 
-        # carb.log_warn("3) MID (by color)")
-        # self._hold(self.hold_move_s, self.pose_mid_deg)
+        carb.log_warn("3) MID (by color)")
+        self._hold(self.hold_move_s, self.pose_mid_deg)
 
-        # carb.log_warn("4) POSE_2SHELF_DEG")
-        # self._hold(self.hold_move_s, self.pose_2shelf_deg)
+        carb.log_warn("4) POSE_2SHELF_DEG")
+        self._hold(self.hold_move_s, self.pose_2shelf_deg)
 
-        # carb.log_warn("5) POSE_PLACE2SHELF_DEG")
-        # self._hold(self.hold_move_s, self.pose_place2shelf_deg)
+        carb.log_warn("5) POSE_PLACE2SHELF_DEG")
+        self._hold(self.hold_move_s, self.pose_place2shelf_deg)
 
-        # carb.log_warn("6) DETACH")
-        # self.detach_book_from_cup()
-        # self._hold(self.hold_detach_s, self.pose_place2shelf_deg)
+        carb.log_warn("6) DETACH")
+        self.detach_book_from_cup()
+        self._hold(self.hold_detach_s, self.pose_place2shelf_deg)
 
-        # carb.log_warn("7) READY")
-        # self._hold(self.hold_move_s, self.pose_ready_deg)
+        carb.log_warn("7) READY")
+        self._hold(self.hold_move_s, self.pose_ready_deg)
 
     def _init(self):
         if not os.path.isfile(self.env_usd_path):
