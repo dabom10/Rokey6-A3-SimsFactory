@@ -28,10 +28,10 @@ PLACE = "B"   # "A"=red, "B"=yellow, "C"=blue
 # ================================
 # 설정 상수 (클래스 밖)
 # ================================
-ENV_USD_PATH = "/home/kyb/Rokey6-A3-SimsFactory/project/environment_shelf.usd"
+ENV_USD_PATH = "/home/kyb/Rokey6-A3-SimsFactory/project/environment_carter_shelf.usd"
 
-ROBOT_ARTICULATION_ROOT = "/Root/robot/run_robot"
-EE_LINK_PATH = "/Root/robot/run_robot/ur10/ee_link"
+ROBOT_ARTICULATION_ROOT = "/Root/robot/nova_carter"
+EE_LINK_PATH = "/Root/robot/nova_carter/ur10/ee_link"
 GRAPH_UR10 = "/Root/robot/run_robot/ur10/Graphs/Graphs/Position_Controller"
 
 # 씬에 존재하는 책 prim 경로들 (노/파 포함)
@@ -57,7 +57,7 @@ POSE_READY_DEG = [0, -90.0, -90.0, -90, 90.0, 0.0]
 # 책을 잡는(픽업) 자세: 색상별
 # ================================
 POSE_PICK_RED_DEG = [5, -127.0, -92.0, -53, 90.0, 0.0]
-POSE_PICK_YELLOW_DEG = [7, -110.0, -124.0, -38, 90.0, 0.0]
+POSE_PICK_YELLOW_DEG = [7, -97.0, -118.0, -50, 90.0, 0.0]
 POSE_PICK_BLUE_DEG = [10, -70, -140.0, -55, 90.0, 0.0]
 
 POSE_PICK_BY_COLOR = {
@@ -343,25 +343,25 @@ class amr2shelf:
         carb.log_warn("1) PICK pose")
         self._hold(self.hold_move_s, self.pose_pick_deg)
 
-        carb.log_warn("2) ATTACH")
-        self.attach_book_to_cup()
-        self._hold(self.hold_attach_s, self.pose_pick_deg)
+        # carb.log_warn("2) ATTACH")
+        # self.attach_book_to_cup()
+        # self._hold(self.hold_attach_s, self.pose_pick_deg)
 
-        carb.log_warn("3) MID (by color)")
-        self._hold(self.hold_move_s, self.pose_mid_deg)
+        # carb.log_warn("3) MID (by color)")
+        # self._hold(self.hold_move_s, self.pose_mid_deg)
 
-        carb.log_warn("4) POSE_2SHELF_DEG")
-        self._hold(self.hold_move_s, self.pose_2shelf_deg)
+        # carb.log_warn("4) POSE_2SHELF_DEG")
+        # self._hold(self.hold_move_s, self.pose_2shelf_deg)
 
-        carb.log_warn("5) POSE_PLACE2SHELF_DEG")
-        self._hold(self.hold_move_s, self.pose_place2shelf_deg)
+        # carb.log_warn("5) POSE_PLACE2SHELF_DEG")
+        # self._hold(self.hold_move_s, self.pose_place2shelf_deg)
 
-        carb.log_warn("6) DETACH")
-        self.detach_book_from_cup()
-        self._hold(self.hold_detach_s, self.pose_place2shelf_deg)
+        # carb.log_warn("6) DETACH")
+        # self.detach_book_from_cup()
+        # self._hold(self.hold_detach_s, self.pose_place2shelf_deg)
 
-        carb.log_warn("7) READY")
-        self._hold(self.hold_move_s, self.pose_ready_deg)
+        # carb.log_warn("7) READY")
+        # self._hold(self.hold_move_s, self.pose_ready_deg)
 
     def _init(self):
         if not os.path.isfile(self.env_usd_path):

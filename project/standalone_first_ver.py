@@ -32,7 +32,7 @@ UR10_PRIM_PATH = "/Root/robot/nova_carter/ur10"
 EE_LINK_PATH = "/Root/robot/nova_carter/ur10/ee_link"
 CAMERA_PRIM_PATH = "/Root/robot/nova_carter/ur10/ee_link/short_gripper/Camera"
 
-GRAPH_UR10 = "/Root/robot/ur10/Graphs/Graphs/Position_Controller"
+GRAPH_UR10 = "/Root/robot/nova_carter/ur10/Graphs/Graphs/Position_Controller"
 
 BOOK_SPAWN_POS = (-12.7, 5.2, 1.5)
 BOOK_SCALE = (0.15, 0.25, 0.04)
