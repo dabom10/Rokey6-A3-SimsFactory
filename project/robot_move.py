@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-robot_move.py  (통합 최종본)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-전체 흐름:
-  [Phase 1]  environment.usd 로드
-             → 책 3권 spawn → UR10이 책을 KLT 박스에 담기
-
-  [Phase 2]  같은 World/stage/art 재사용
-             Home → A(빨간책 꽂기) → B(노란책 꽂기)
-                 → C(파란책 꽂기) → Home
-
-실행:
-    cd ~/Rokey6-A3-SimsFactory/project
-    ~/isaacsim/python.sh robot_move.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+robot_move.py  (통합 최종본 - Phase1→2 책 낙하 방지)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Phase 1]  책 3권 KLT 박스 담기
+[전환]     책 3권을 /Root/robot 자식으로 reparent
+           → teleport 시 로봇과 함께 이동
+           → teleport 완료 후 /Root 로 복귀
+[Phase 2]  Home → A(빨간책) → B(노란책) → C(파란책) → Home
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 # ══════════════════════════════════════════════════════════════
@@ -73,10 +67,10 @@ P2_ROBOT_PRIM_PATH = "/Root/robot"
 P2_EE_LINK_PATH    = "/Root/robot/robot/nova_carter/ur10/ee_link"
 
 P2_WAYPOINTS = {
-    "Home": ( 0.0,  0.0, 0.09004,  0.0),
-    "A":    ( 5.46333,  8.56107, 0.09004, 90.0),
-    "B":    (-1.74080, 11.48552, 0.09004, 90.0),
-    "C":    (-5.23302,  8.53896, 0.09004, 90.0),
+    "Home": ( 0.0,     0.0,     0.09004,  0.0),
+    "A":    ( 5.46333, 8.56107, 0.09004, 90.0),
+    "B":    (-1.74080,11.48552, 0.09004, 90.0),
+    "C":    (-5.23302, 8.53896, 0.09004, 90.0),
 }
 P2_SEQUENCE    = ["Home", "A", "B", "C", "Home"]
 P2_SHELF_STOPS = {"A", "B", "C"}
@@ -156,7 +150,99 @@ def rpy_deg_to_quatd(roll=0.0, pitch=0.0, yaw=0.0):
     )
 
 
+def prim_exists(stage, path):
+    p = stage.GetPrimAtPath(path)
+    return bool(p and p.IsValid())
+
+
+def get_world_matrix(stage, path) -> Gf.Matrix4d:
+    prim = stage.GetPrimAtPath(path)
+    return UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+
+
+def move_prim(src: str, dst: str):
+    omni.kit.commands.execute("MovePrim", path_from=src, path_to=dst)
+
+
+def reparent_with_world_pose(stage, src_path: str, dst_parent_path: str) -> str:
+    """
+    src_path prim을 dst_parent_path 하위로 이동하면서
+    World Pose를 유지하도록 local transform 재계산.
+    반환: 새 경로
+    """
+    prim      = stage.GetPrimAtPath(src_path)
+    prim_name = prim.GetName()
+    new_path  = str(Sdf.Path(dst_parent_path).AppendChild(prim_name))
+
+    # world pose 저장
+    world_m = get_world_matrix(stage, src_path)
+
+    # prim 이동
+    move_prim(src_path, new_path)
+
+    # 새 parent world pose 계산 → local = world * parent_inv
+    parent_world_m = get_world_matrix(stage, dst_parent_path)
+    local_m        = world_m * parent_world_m.GetInverse()
+
+    # xform 재설정
+    moved = stage.GetPrimAtPath(new_path)
+    xf    = UsdGeom.Xformable(moved)
+    xf.ClearXformOpOrder()
+    xf.AddTransformOp().Set(Gf.Matrix4d(local_m))
+
+    return new_path
+
+
+def attach_books_to_robot(stage, robot_root_path: str) -> dict:
+    """
+    Phase1→2 전환 시 책 3권을 robot 자식으로 reparent.
+    → teleport 시 로봇과 함께 이동.
+    반환: {color: new_book_path}
+    """
+    result = {}
+    for color, info in P1_BOOKS.items():
+        orig_path = find_book_by_color(stage, color, known_path=info["path"])
+        new_path  = reparent_with_world_pose(stage, orig_path, robot_root_path)
+        result[color] = new_path
+        carb.log_warn(f"[ATTACH_ROBOT] {color}: {orig_path} → {new_path}")
+    return result
+
+
+def detach_books_from_robot(stage, book_paths: dict, restore_parent: str = "/Root") -> dict:
+    """
+    teleport 완료 후 책을 restore_parent 로 복귀.
+    반환: {color: restored_path}
+    """
+    result = {}
+    for color, path in book_paths.items():
+        if not prim_exists(stage, path):
+            carb.log_warn(f"[DETACH_ROBOT] {color} prim 없음, 건너뜀: {path}")
+            continue
+        new_path = reparent_with_world_pose(stage, path, restore_parent)
+        result[color] = new_path
+        carb.log_warn(f"[DETACH_ROBOT] {color}: {path} → {new_path}")
+    return result
+
+
+def detach_single_book_from_robot(stage, color: str,
+                                   book_paths: dict,
+                                   restore_parent: str = "/Root") -> str:
+    """
+    A/B/C 책꽂기 직전에 해당 색상 책 1권만 robot 자식에서 해제.
+    반환: 복귀된 경로
+    """
+    path = book_paths.get(color)
+    if not path or not prim_exists(stage, path):
+        carb.log_warn(f"[DETACH_SINGLE] '{color}' 재탐색")
+        path = find_book_by_color(stage, color)
+
+    new_path = reparent_with_world_pose(stage, path, restore_parent)
+    carb.log_warn(f"[DETACH_SINGLE] {color}: {path} → {new_path}")
+    return new_path
+
+
 def teleport_robot(world, robot_prim, x, y, z, orient_z_deg):
+    """로봇 루트 prim을 순간이동. 책이 자식이면 함께 이동됨."""
     xformable    = UsdGeom.Xformable(robot_prim)
     existing_ops = {op.GetOpName(): op for op in xformable.GetOrderedXformOps()}
     quat         = rpy_deg_to_quatd(yaw=orient_z_deg)
@@ -194,7 +280,6 @@ def dwell(world, seconds):
 
 
 def find_book_by_color(stage, color: str, known_path: str = None) -> str:
-    """색상 키워드로 stage에서 책 prim 경로를 탐색."""
     if known_path:
         p = stage.GetPrimAtPath(known_path)
         if p and p.IsValid():
@@ -203,15 +288,13 @@ def find_book_by_color(stage, color: str, known_path: str = None) -> str:
     color_kw = color.lower()
     EXCLUDE  = ["look", "material", "shader", "mesh", "decal", "texture", "floor"]
 
-    # 1) "book" + 색상 동시 포함
     for prim in stage.Traverse():
         name = prim.GetName().lower()
         if "book" in name and color_kw in name:
             path = str(prim.GetPath())
-            carb.log_warn(f"[BOOK] '{color}' 발견 (book+color): {path}")
+            carb.log_warn(f"[BOOK] '{color}' (book+color): {path}")
             return path
 
-    # 2) 색상 포함, 제외 키워드 없음
     candidates = []
     for prim in stage.Traverse():
         name = prim.GetName().lower()
@@ -224,7 +307,6 @@ def find_book_by_color(stage, color: str, known_path: str = None) -> str:
         carb.log_warn(f"[BOOK] '{color}' 선택: {candidates[0]}")
         return candidates[0]
 
-    # 3) 실패 시 디버그
     carb.log_warn(f"[BOOK] '{color}' 탐색 실패. depth≤4 prim:")
     for prim in stage.Traverse():
         if prim.GetPath().pathString.count("/") <= 4:
@@ -313,7 +395,6 @@ class place2amr:
             cam = Camera(prim_path=P1_CAMERA_PRIM_PATH)
             cam.initialize()
             rgb = cam.get_rgb()
-            # ★ None 체크는 반드시 is None / is not None 사용
             if rgb is None or rgb.size == 0:
                 return None
             arr = (rgb[:,:,:3]*255).astype(np.uint8) if rgb.max() <= 1.0 \
@@ -324,7 +405,6 @@ class place2amr:
             return None
 
     def _detect_color(self, img):
-        # ★ img 가 None 인지는 호출 전에 확인하므로 여기선 바로 처리
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         cnt = defaultdict(int)
         k   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
@@ -380,7 +460,6 @@ class place2amr:
 
         current_action     = None
         attached_quat_wxyz = None
-        attached           = False
 
         def move(q_deg):
             nonlocal current_action
@@ -411,10 +490,8 @@ class place2amr:
         carb.log_warn(f"[P1] {book_name} → APPROACH")
         move(P1_POSES["approach"]); hold(P1_HOLD_APPROACH_S, False)
 
-        # 색상 탐지 루프
         detected = "unknown"
-        t0 = time.time()
-        attempt  = 0
+        t0 = time.time(); attempt = 0
         while simulation_app.is_running() and (time.time()-t0) < P1_COLOR_DETECT_WAIT_S:
             if current_action is not None:
                 self.robot_art.apply_action(current_action)
@@ -423,24 +500,23 @@ class place2amr:
             if el != attempt:
                 attempt = el
                 img = self._get_camera_image()
-                if img is not None:           # ★ is not None 으로 체크
+                if img is not None:
                     res = self._detect_color(img)
                     if res != "unknown":
                         detected = res
                         carb.log_warn(f"[P1] {book_name} 색상 탐지: {detected}")
                         break
 
-        # 루프 후 미탐지 시 한 번 더 시도
         if detected == "unknown":
             img = self._get_camera_image()
-            if img is not None:               # ★ is not None 으로 체크
+            if img is not None:
                 detected = self._detect_color(img)
         carb.log_warn(f"[P1] {book_name} 최종 색상: {detected}")
 
         carb.log_warn(f"[P1] {book_name} → GRASP")
         move(P1_POSES["grasp"]); hold(P1_HOLD_GRASP_S, False)
 
-        attached = True; attached_quat_wxyz = None
+        attached_quat_wxyz = None
         carb.log_warn(f"[P1] {book_name} → LIFT")
         move(P1_POSES["lift"]); hold(P1_HOLD_LIFT_S, True)
 
@@ -451,7 +527,6 @@ class place2amr:
         carb.log_warn(f"[P1] {book_name} → PLACE ({detected})")
         move(place_pose); hold(P1_HOLD_PLACE_S, True)
 
-        attached = False
         hold(1.0, False)
 
         carb.log_warn(f"[P1] {book_name} → READY 복귀")
@@ -476,14 +551,20 @@ class place2amr:
 # ══════════════════════════════════════════════════════════════
 
 class amr2shelf:
-    def __init__(self, world, stage, art, place):
+    def __init__(self, world, stage, art, place, book_paths: dict):
+        """
+        book_paths: {color: current_stage_path}
+        Phase1→2 전환 후 detach_books_from_robot()이 반환한 경로를 넘겨받음.
+        """
         self.world        = world
         self.stage        = stage
         self.art          = art
         self.place        = str(place).strip().upper()
         self.target_color = P2_PLACE_COLOR[self.place]
 
-        known          = P1_BOOKS[self.target_color]["path"]
+        # 전달받은 경로 우선, 없으면 탐색
+        known = book_paths.get(self.target_color,
+                               P1_BOOKS[self.target_color]["path"])
         self.book_path = find_book_by_color(stage, self.target_color, known_path=known)
 
         self.pose_pick_deg    = P2_POSE_PICK_BY_COLOR[self.target_color]
@@ -630,14 +711,12 @@ def main():
 
     stage = omni.usd.get_context().get_stage()
 
-    # ActionGraph 비활성화
     for ag_path in P2_CARTER_ACTIONGRAPH_PATHS:
         ag = stage.GetPrimAtPath(ag_path)
         if ag and ag.IsValid():
             ag.SetActive(False)
             carb.log_warn(f"[INIT] ActionGraph disabled: {ag_path}")
 
-    # World + Articulation 초기화 (한 번만)
     world = World(physics_dt=1/60, rendering_dt=1/60)
     art   = world.scene.add(
         SingleArticulation(prim_path=P1_ROBOT_ART_ROOT, name="carter_ur10")
@@ -657,9 +736,15 @@ def main():
     p1 = place2amr(world=world, stage=stage, art=art)
     p1.run_phase1()
 
+    # ── Phase 1 → 2 전환: 책을 로봇 자식으로 ────
     carb.log_warn("\n" + "="*60)
-    carb.log_warn("  [PHASE 1]  완료 → Phase 2 준비 중...")
+    carb.log_warn("  [전환]  책 3권 → /Root/robot 자식으로 reparent (낙하 방지)")
     carb.log_warn("="*60)
+
+    # 책 경로를 현재 stage에서 확인 후 robot 자식으로 이동
+    robot_book_paths = attach_books_to_robot(stage, robot_root_path=P2_ROBOT_PRIM_PATH)
+
+    # 안정화
     dwell(world, P2_START_DELAY_S)
 
     # ── Phase 2 ──────────────────────────────────
@@ -672,18 +757,44 @@ def main():
     carb.log_warn("  Home → A(red) → B(yellow) → C(blue) → Home")
     carb.log_warn("="*60)
 
-    for idx, wp_name in enumerate(P2_SEQUENCE):
+    # ── Home 이동: 책이 로봇 자식이므로 같이 이동 ────────────
+    x, y, z, oz = P2_WAYPOINTS["Home"]
+    carb.log_warn(f"\n[P2] [1/{len(P2_SEQUENCE)}] ▶  Home  ({x}, {y}, {z})  orient_z={oz}°")
+    teleport_robot(world, robot_prim, x, y, z, oz)
+    dwell(world, P2_DWELL_TIME)
+    # Home 도착 후에도 책은 robot 자식 상태 유지 (아직 /Root로 복귀 X)
+
+    # 나머지 경로 추적용 딕셔너리 (robot 자식 경로 유지)
+    current_book_paths = dict(robot_book_paths)
+
+    # A → B → C → Home 순회
+    for idx, wp_name in enumerate(P2_SEQUENCE[1:], start=2):
         x, y, z, oz = P2_WAYPOINTS[wp_name]
-        carb.log_warn(f"\n[P2] [{idx+1}/{len(P2_SEQUENCE)}] ▶  {wp_name}  "
+        carb.log_warn(f"\n[P2] [{idx}/{len(P2_SEQUENCE)}] ▶  {wp_name}  "
                       f"({x:.4f}, {y:.4f}, {z:.5f})  orient_z={oz}°")
 
         teleport_robot(world, robot_prim, x, y, z, oz)
         dwell(world, P2_DWELL_TIME)
 
         if wp_name in P2_SHELF_STOPS:
+            target_color = P2_PLACE_COLOR[wp_name]
+
+            # ★ 해당 책 1권만 robot 자식에서 해제 → /Root 로 복귀
+            carb.log_warn(f"[P2] [{wp_name}] {target_color} 책 robot 자식 해제")
+            restored_path = detach_single_book_from_robot(
+                stage, target_color, current_book_paths, restore_parent="/Root"
+            )
+            current_book_paths[target_color] = restored_path
+            dwell(world, 0.5)   # 위치 안정화
+
             carb.log_warn(f"[P2] ★ [{wp_name}] 도착 → 책꽂기 시퀀스 시작")
-            shelf = amr2shelf(world=world, stage=stage, art=art, place=wp_name)
+            shelf = amr2shelf(
+                world=world, stage=stage, art=art,
+                place=wp_name,
+                book_paths=current_book_paths,
+            )
             shelf.run_sequence()
+            current_book_paths[shelf.target_color] = shelf.book_path
             carb.log_warn(f"[P2] ★ [{wp_name}] 책꽂기 완료")
 
     carb.log_warn("\n" + "="*60)
