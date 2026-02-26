@@ -71,7 +71,7 @@ POSE_READY_DEG = [0, -90.0, -90.0, -90, 90.0, 0.0]
 
 # 책을 잡는(픽업) 자세: 색상별
 POSE_PICK_RED_DEG = [5, -127.0, -92.0, -53, 90.0, 0.0]
-POSE_PICK_YELLOW_DEG = [7, -97.0, -118.0, -50, 90.0, 0.0]
+POSE_PICK_YELLOW_DEG = [7, -105.0, -118.0, -52, 90.0, 0.0]
 POSE_PICK_BLUE_DEG = [10, -70, -140.0, -55, 90.0, 0.0]
 
 POSE_PICK_BY_COLOR = {
