@@ -2,7 +2,7 @@
 
 > NVIDIA Isaac Sim 5.0.0 환경에서 구현한 도서관 자동 반납 처리 로봇 시스템
 
-**Team Sims Factory** | dabom10 · unknownbinfile · jowenchoi  
+**Team Sims Factory** | dabom10 · jeongho980403 · jowenchoi · unknownbinfile
 **기간**: 2026. 02. 21 ~ 02. 26
 
 ![Isaac Sim](https://img.shields.io/badge/NVIDIA-Isaac_Sim_5.0.0-76B900?style=flat-square&logo=nvidia)
