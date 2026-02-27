@@ -34,7 +34,7 @@ P1_BOOKS = {
                "hsv_ranges": [(_np.array([15,30,30]),  _np.array([35,255,255]))]},
 }
 
-P1_START_DELAY_S        = 4.0
+P1_START_DELAY_S        = 6.0
 P1_HOLD_APPROACH_S      = 2.0
 P1_HOLD_GRASP_S         = 2.0
 P1_HOLD_LIFT_S          = 2.0
@@ -313,7 +313,21 @@ def find_book_by_color(stage, color: str, known_path: str = None) -> str:
             carb.log_warn(f"  {prim.GetPath()}")
     raise RuntimeError(f"[BOOK] '{color}' 책 prim을 찾을 수 없습니다.")
 
-
+# ─────────────────────────────────────────────
+# Viewport Camera Switch
+# ─────────────────────────────────────────────
+def switch_viewport_camera(camera_path: str):
+    try:
+        import omni.kit.viewport.utility as vp_utils
+        viewport = vp_utils.get_active_viewport()
+        if viewport is None:
+            carb.log_warn("[CAM] Active viewport not found.")
+            return
+        viewport.set_active_camera(camera_path)
+        carb.log_warn(f"[CAM] Switched to: {camera_path}")
+    except Exception as e:
+        carb.log_warn(f"[CAM] Switch failed: {e}")
+        
 # ══════════════════════════════════════════════════════════════
 #  Phase 1: place2amr
 # ══════════════════════════════════════════════════════════════
@@ -534,6 +548,7 @@ class place2amr:
         carb.log_warn(f"[P1] {book_name} 완료")
 
     def run_phase1(self):
+        switch_viewport_camera("/Root/Cam/Camera_01")
         self._fix_stiffness()
         carb.log_warn("[P1] Pick & Place 시작!")
         books_order = ["red", "blue", "yellow"]
@@ -770,11 +785,17 @@ def main():
     # A → B → C → Home 순회
     for idx, wp_name in enumerate(P2_SEQUENCE[1:], start=2):
         x, y, z, oz = P2_WAYPOINTS[wp_name]
-        carb.log_warn(f"\n[P2] [{idx}/{len(P2_SEQUENCE)}] ▶  {wp_name}  "
-                      f"({x:.4f}, {y:.4f}, {z:.5f})  orient_z={oz}°")
-
         teleport_robot(world, robot_prim, x, y, z, oz)
         dwell(world, P2_DWELL_TIME)
+        
+        if wp_name == "A":
+            switch_viewport_camera("/Root/Cam/Camera_02")
+        elif wp_name == "B":
+            switch_viewport_camera("/Root/Cam/Camera_03")
+        elif wp_name == "C":
+            switch_viewport_camera("/Root/Cam/Camera_04")
+        elif wp_name == "Home":
+            switch_viewport_camera("/Root/Cam/Camera_01")
 
         if wp_name in P2_SHELF_STOPS:
             target_color = P2_PLACE_COLOR[wp_name]
