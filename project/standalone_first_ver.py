@@ -37,7 +37,7 @@ CAMERA_PRIM_PATH        = "/Root/robot/robot/nova_carter/ur10/ee_link/short_grip
 
 GRAPH_UR10 = None
 
-BOOK_SPAWN_POS = (-12.7, 5.2, 1.5)
+BOOK_SPAWN_POS = (-11.974369734426189, 5.1930219887729505, 1.2064977953345049)
 BOOK_SCALE     = (0.15, 0.25, 0.04)
 
 BOOKS = {
