@@ -14,12 +14,12 @@ robot_move.py  (통합 최종본 - Phase1→2 책 낙하 방지)
 # ══════════════════════════════════════════════════════════════
 #  [Phase 1] 설정
 # ══════════════════════════════════════════════════════════════
-P1_USD_PATH             = "/home/rokey/Rokey6-A3-SimsFactory/project/environment.usd"
+P1_USD_PATH             = "/home/kyb/Rokey6-A3-SimsFactory/project/environment.usd"
 P1_ROBOT_ART_ROOT       = "/Root/robot/robot"
 P1_EE_LINK_PATH         = "/Root/robot/robot/nova_carter/ur10/ee_link"
 P1_CAMERA_PRIM_PATH     = "/Root/robot/robot/nova_carter/ur10/ee_link/short_gripper/Camera"
 
-P1_BOOK_SPAWN_POS       = (-1.7504664195001105, -1.0139820630486194, 1.3490003153683388)
+P1_BOOK_SPAWN_POS       = (-2.34664195001105, -1.0139820630486194, 1.3490003153683388)
 P1_BOOK_SCALE           = (0.15, 0.25, 0.04)
 P1_BOOK_SPAWN_INTERVAL_S = 1.0
 
@@ -67,10 +67,10 @@ P2_ROBOT_PRIM_PATH = "/Root/robot"
 P2_EE_LINK_PATH    = "/Root/robot/robot/nova_carter/ur10/ee_link"
 
 P2_WAYPOINTS = {
-    "Home": ( 0.0,     0.0,     0.09004,  0.0),
-    "A":    ( 5.76333, 8.56107, 0.09004, 90.0),
-    "B":    (-1.44080,11.48552, 0.09004, 90.0),
-    "C":    (-4.93302, 8.53896, 0.09004, 90.0),
+    "Home": ( 0.4,     0.0,     0.09004,  0.0),
+    "A":    ( 5.704565065, 8.56107, 0.09004, 90.0),
+    "B":    (-1.43879 ,11.48552, 0.09004, 90.0),
+    "C":    (-5.032553, 8.53896, 0.09004, 90.0),
 }
 P2_SEQUENCE    = ["Home", "A", "B", "C", "Home"]
 P2_SHELF_STOPS = {"A", "B", "C"}
